@@ -4,7 +4,7 @@ import os
 import re
 
 # توکن ربات
-TOKEN = 'your token'  # عوضش کن!
+TOKEN = '8236625242:AAEhDvWkgucrnrCXrZAQcchoIBf-FFlaDDE'  # عوضش کن!
 bot = telebot.TeleBot(TOKEN)
 
 def download_tiktok(url):
