@@ -33,19 +33,22 @@ def download_tiktok(url):
         'quiet': True,
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([f"https://tiktok.com/video/{video_id}"])
-    return f"{video_id}.mp4"
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([f"https://tiktok.com/video/{video_id}"])
+        return f"{video_id}.mp4"
+    except Exception as e:
+        raise ValueError(f"دانلود نشد: {e}")
 
 @bot.message_handler(func=lambda m: 'tiktok.com' in m.text)
 def reply(m):
     try:
-        status = bot.reply_to(m, "در حال دانلود...")
+        status = bot.reply_to(m, "در حال دانلود... ⏳")
         file = download_tiktok(m.text)
         size = os.path.getsize(file) / (1024*1024)
         if size > 48:
             os.remove(file)
-            bot.edit_message_text("فایل خیلی بزرگه!", m.chat.id, status.id)
+            bot.edit_message_text("فایل خیلی بزرگه (>48MB)", m.chat.id, status.id)
             return
         with open(file, 'rb') as v:
             bot.send_video(m.chat.id, v, caption=f"دانلود شد! {size:.1f}MB")
@@ -54,10 +57,11 @@ def reply(m):
     except Exception as e:
         bot.reply_to(m, f"خطا: {e}")
 
-print("ربات روشن شد!")
+print("ربات روشن شد — منتظر پیام...")
 while True:
     try:
-        bot.polling(none_stop=True)
+        bot.polling(none_stop=True, interval=0, timeout=20)
+        time.sleep(1)
     except Exception as e:
-        print("اتصال قطع شد، دوباره...")
+        print(f"اتصال قطع شد: {e} — ۵ ثانیه دیگه...")
         time.sleep(5)
