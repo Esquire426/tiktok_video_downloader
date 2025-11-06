@@ -2,62 +2,110 @@ import telebot
 import yt_dlp
 import os
 import re
-import time
 
-TOKEN = os.getenv('TOKEN')
-if not TOKEN:
-    print("خطا: توکن پیدا نشد!")
-    exit()
-
+# توکن ربات
+TOKEN = '8236625242:AAEhDvWkgucrnrCXrZAQcchoIBf-FFlaDDE'  # عوضش کن!
 bot = telebot.TeleBot(TOKEN)
 
 def download_tiktok(url):
+    # تبدیل لینک کوتاه vt.tiktok.com
     if 'vt.tiktok.com' in url:
-        import requests
         try:
-            r = requests.head(url, allow_redirects=True, timeout=10)
-            url = r.url
-        except: pass
+            import requests
+            response = requests.head(url, allow_redirects=True, timeout=10)
+            url = response.url
+        except:
+            pass
 
+    # فقط ویدیوها رو قبول کن
     if '/photo/' in url:
-        raise ValueError("فقط ویدیو!")
+        raise ValueError("فقط ویدیو! عکس اسلایدی پشتیبانی نمی‌شه.")
 
+    # استخراج آیدی
     match = re.search(r'/video/(\d+)', url)
-    if not match: raise ValueError("لینک نامعتبر!")
+    if not match:
+        raise ValueError("لینک ویدیو نامعتبر!")
     video_id = match.group(1)
+    clean_url = f"https://www.tiktok.com/@/video/{video_id}"
 
     ydl_opts = {
-        'outtmpl': f'{video_id}.mp4',
-        'format': 'best[height<=720]/best',
+        'outtmpl': f'{video_id}.%(ext)s',
+        'format': 'best[height<=720][ext=mp4]/best[height<=720]/best',
         'merge_output_format': 'mp4',
         'quiet': True,
+        'retries': 5,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"https://tiktok.com/video/{video_id}"])
-        return f"{video_id}.mp4"
+            info = ydl.extract_info(clean_url, download=True)
+            filename = ydl.prepare_filename(info)
+            if not os.path.exists(filename):
+                base = filename.rsplit('.', 1)[0]
+                for ext in ['.mp4', '.webm']:
+                    test = base + '.' + ext
+                    if os.path.exists(test):
+                        filename = test
+                        break
+            return filename
     except Exception as e:
-        raise ValueError(f"دانلود نشد: {e}")
+        print(f"خطا در دانلود: {e}")
+        raise ValueError("دانلود نشد.")
 
-@bot.message_handler(func=lambda m: 'tiktok.com' in m.text)
-def reply(m):
+@bot.message_handler(func=lambda m: True)
+def reply(message):
+    if 'tiktok.com' not in message.text:
+        return
+
     try:
-        status = bot.reply_to(m, "در حال دانلود... ⏳")
-        file = download_tiktok(m.text)
-        size = os.path.getsize(file) / (1024*1024)
-        if size > 48:
-            os.remove(file)
-            bot.edit_message_text("فایل خیلی بزرگه (>48MB)", m.chat.id, status.id)
-            return
-        with open(file, 'rb') as v:
-            bot.send_video(m.chat.id, v, caption=f"دانلود شد! {size:.1f}MB")
-        os.remove(file)
-        bot.edit_message_text("ارسال شد ✅", m.chat.id, status.id)
-    except Exception as e:
-        bot.reply_to(m, f"خطا: {e}")
+        status_msg = bot.send_message(message.chat.id, "در حال دانلود... ⏳")
 
-print("ربات روشن شد — منتظر پیام...")
+        if message.chat.type in ['group', 'supergroup']:
+            try:
+                bot.delete_message(message.chat.id, message.message_id)
+            except:
+                pass
+
+        file_path = download_tiktok(message.text)
+        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+
+        if file_size_mb > 48:
+            os.remove(file_path)
+            bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                text="فایل خیلی بزرگه (>50 مگ)!"
+            )
+            return
+
+        with open(file_path, 'rb') as f:
+            bot.send_video(
+                message.chat.id,
+                f,
+                caption=f"دانلود شد!\nحجم: {file_size_mb:.1f} مگ",
+                timeout=1200
+            )
+
+        os.remove(file_path)
+
+        bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=status_msg.message_id,
+            text="ارسال شد ✅"
+        )
+
+    except Exception as e:
+        try:
+            bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id,
+                text=f"خطا: {str(e)}"
+            )
+        except:
+            pass
+
+print("ربات روشن شد...")
+bot.polling()
 while True:
     try:
         bot.polling(none_stop=True, interval=0, timeout=20)
