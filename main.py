@@ -2,114 +2,121 @@ import telebot
 import yt_dlp
 import os
 import re
+import time
+import logging
 
-# توکن ربات
-TOKEN = '8236625242:AAEhDvWkgucrnrCXrZAQcchoIBf-FFlaDDE'  # عوضش کن!
+# تنظیم لاگ برای دیباگ
+logging.basicConfig(level=logging.INFO)
+
+TOKEN = os.getenv('TOKEN')
+if not TOKEN:
+    print("خطا: توکن پیدا نشد!")
+    exit()
+
 bot = telebot.TeleBot(TOKEN)
 
+def extract_tiktok_url(text):
+    # پیدا کردن هر لینک تیک‌تاک
+    urls = re.findall(r'(https?://[^\s]+tiktok\.com/[^\s]+)', text)
+    for url in urls:
+        url = url.split('?')[0]  # حذف پارامترها
+        if '/video/' in url or 'vt.tiktok.com' in url:
+            return url
+    return None
+
 def download_tiktok(url):
-    # تبدیل لینک کوتاه vt.tiktok.com
+    # حل مشکل ریدایرکت vt.tiktok.com
     if 'vt.tiktok.com' in url:
+        import requests
         try:
-            import requests
-            response = requests.head(url, allow_redirects=True, timeout=10)
-            url = response.url
-        except:
-            pass
+            with requests.Session() as s:
+                s.headers.update({
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+                r = s.head(url, allow_redirects=True, timeout=15)
+                url = r.url
+        except Exception as e:
+            print(f"ریدایرکت شکست: {e}")
 
-    # فقط ویدیوها رو قبول کن
+    # چک کردن 404
+    if 'tiktok.com/404' in url:
+        raise ValueError("لینک منقضی شده یا نامعتبر است.")
+
+    # فقط ویدیو
     if '/photo/' in url:
-        raise ValueError("فقط ویدیو! عکس اسلایدی پشتیبانی نمی‌شه.")
+        raise ValueError("فقط ویدیو!")
 
-    # استخراج آیدی
+    # استخراج ID
     match = re.search(r'/video/(\d+)', url)
     if not match:
-        raise ValueError("لینک ویدیو نامعتبر!")
+        raise ValueError("لینک ویدیو پیدا نشد!")
     video_id = match.group(1)
-    clean_url = f"https://www.tiktok.com/@/video/{video_id}"
 
     ydl_opts = {
-        'outtmpl': f'{video_id}.%(ext)s',
+        'outtmpl': f'{video_id}.mp4',
         'format': 'best[height<=720][ext=mp4]/best[height<=720]/best',
         'merge_output_format': 'mp4',
-        'quiet': True,
-        'retries': 5,
+        'quiet': False,
+        'no_warnings': False,
+        'cookiefile': 'cookies.txt',  # اختیاری: اگر کوکی داری
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        'retries': 3,
+        'fragment_retries': 5,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=True)
+            info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-            if not os.path.exists(filename):
-                base = filename.rsplit('.', 1)[0]
-                for ext in ['.mp4', '.webm']:
-                    test = base + '.' + ext
-                    if os.path.exists(test):
-                        filename = test
-                        break
             return filename
     except Exception as e:
-        print(f"خطا در دانلود: {e}")
-        raise ValueError("دانلود نشد.")
+        raise ValueError(f"دانلود نشد: {str(e)}")
 
-@bot.message_handler(func=lambda m: True)
-def reply(message):
-    if 'tiktok.com' not in message.text:
-        return
-
+@bot.message_handler(func=lambda m: 'tiktok.com' in m.text.lower())
+def reply(m):
     try:
-        status_msg = bot.send_message(message.chat.id, "در حال دانلود... ⏳")
-
-        if message.chat.type in ['group', 'supergroup']:
-            try:
-                bot.delete_message(message.chat.id, message.message_id)
-            except:
-                pass
-
-        file_path = download_tiktok(message.text)
-        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-
-        if file_size_mb > 48:
-            os.remove(file_path)
-            bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=status_msg.message_id,
-                text="فایل خیلی بزرگه (>50 مگ)!"
-            )
+        url = extract_tiktok_url(m.text)
+        if not url:
+            bot.reply_to(m, "لینک تیک‌تاک پیدا نشد!")
             return
 
-        with open(file_path, 'rb') as f:
+        status = bot.reply_to(m, "در حال دانلود... ⏳")
+
+        file_path = download_tiktok(url)
+        if not os.path.exists(file_path):
+            raise ValueError("فایل دانلود نشد.")
+
+        size_mb = os.path.getsize(file_path) / (1024 * 1024)
+        if size_mb > 48:
+            os.remove(file_path)
+            bot.edit_message_text("فایل خیلی بزرگه (>48MB)", m.chat.id, status.id)
+            return
+
+        with open(file_path, 'rb') as video:
             bot.send_video(
-                message.chat.id,
-                f,
-                caption=f"دانلود شد!\nحجم: {file_size_mb:.1f} مگ",
-                timeout=1200
+                m.chat.id,
+                video,
+                caption=f"دانلود شد! {size_mb:.1f}MB",
+                reply_to_message_id=m.message_id
             )
 
         os.remove(file_path)
-
-        bot.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=status_msg.message_id,
-            text="ارسال شد ✅"
-        )
+        bot.edit_message_text("ارسال شد ✅", m.chat.id, status.id)
 
     except Exception as e:
-        try:
-            bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=status_msg.message_id,
-                text=f"خطا: {str(e)}"
-            )
-        except:
-            pass
+        error_msg = str(e)
+        if "Private video" in error_msg:
+            error_msg = "ویدیو خصوصی است!"
+        elif "Video unavailable" in error_msg:
+            error_msg = "ویدیو در دسترس نیست!"
+        bot.edit_message_text(f"خطا: {error_msg}", m.chat.id, status.id)
 
-print("ربات روشن شد...")
-bot.polling()
+print("ربات روشن شد — منتظر پیام...")
 while True:
     try:
         bot.polling(none_stop=True, interval=0, timeout=20)
-        time.sleep(1)
     except Exception as e:
         print(f"اتصال قطع شد: {e} — ۵ ثانیه دیگه...")
         time.sleep(5)
