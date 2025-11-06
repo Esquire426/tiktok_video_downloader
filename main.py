@@ -100,13 +100,16 @@ def download_tiktok(url):
 # هندلر پیام
 @bot.message_handler(func=lambda m: 'tiktok.com' in m.text.lower())
 def reply(m):
+    file_path = None
+    status_msg = None
     try:
         url = extract_tiktok_url(m.text)
         if not url:
             bot.reply_to(m, "لینک تیک‌تاک پیدا نشد!")
             return
 
-        status = bot.reply_to(m, "در حال دانلود... ⏳")
+        # پیام وضعیت
+        status_msg = bot.reply_to(m, "در حال دانلود... ⏳")
 
         file_path = download_tiktok(url)
         if not os.path.exists(file_path):
@@ -114,15 +117,28 @@ def reply(m):
 
         size_mb = os.path.getsize(file_path) / (1024 * 1024)
         if size_mb > 48:
-            os.remove(file_path)
-            bot.edit_message_text("فایل خیلی بزرگه (>48MB)", m.chat.id, status.id)
-            return
+            raise ValueError("فایل خیلی بزرگه (>48MB)")
 
+        # ارسال ویدیو
         if send_video_telegram(m.chat.id, file_path, f"دانلود شد! {size_mb:.1f}MB", m.message_id):
-            os.remove(file_path)
-            bot.edit_message_text("ارسال شد ✅", m.chat.id, status.id)
+            # ۱. پاک کردن پیام کاربر (لینک)
+            try:
+                bot.delete_message(m.chat.id, m.message_id)
+            except:
+                pass  # اگر نمی‌تونیم پاک کنیم، بی‌خیال
+
+            # ۲. پاک کردن پیام وضعیت
+            try:
+                bot.delete_message(m.chat.id, status_msg.message_id)
+            except:
+                pass
+
+            # ۳. ارسال پیام جدید (اختیاری، برای تأیید)
+            bot.send_message(m.chat.id, "ویدیو با موفقیت ارسال شد! ✅")
+
         else:
             raise Exception("ارسال به تلگرام ناموفق بود.")
+
     except Exception as e:
         error_msg = str(e)
         if "Private video" in error_msg:
@@ -131,16 +147,24 @@ def reply(m):
             error_msg = "ویدیو در دسترس نیست!"
         elif "منقضی" in error_msg or "404" in error_msg:
             error_msg = "لینک منقضی شده یا نامعتبر است."
-        try:
-            bot.edit_message_text(f"خطا: {error_msg}", m.chat.id, status.id)
-        except:
-            bot.reply_to(m, f"خطا: {error_msg}")
+        elif "بزرگه" in error_msg:
+            error_msg = "فایل خیلی بزرگه (>48MB)"
 
-# اجرای ربات
-if __name__ == '__main__':
-    print("ربات روشن شد — منتظر پیام...")
-    try:
-        bot.infinity_polling(timeout=20, long_polling_timeout=25)
-    except Exception as e:
-        print(f"خطای polling: {e}")
-        time.sleep(5)
+        # ویرایش پیام وضعیت به خطا
+        try:
+            if status_msg:
+                bot.edit_message_text(f"خطا: {error_msg}", m.chat.id, status_msg.message_id)
+        except:
+            try:
+                bot.reply_to(m, f"خطا: {error_msg}")
+            except:
+                pass
+
+    finally:
+        # همیشه فایل رو پاک کن
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                print(f"فایل پاک شد: {file_path}")
+            except Exception as e:
+                print(f"خطا در پاک کردن فایل: {e}")
