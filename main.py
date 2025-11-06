@@ -6,7 +6,7 @@ import time
 import logging
 import requests
 
-# لاگ برای دیباگ
+# لاگ برای دیباگ (در Railway هم نشون میده)
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv('TOKEN')
@@ -16,7 +16,7 @@ if not TOKEN:
 
 bot = telebot.TeleBot(TOKEN)
 
-# استخراج لینک تیک‌تاک
+# استخراج لینک تیک‌تاک از متن
 def extract_tiktok_url(text):
     urls = re.findall(r'(https?://[^\s]+tiktok\.com/[^\s]+)', text)
     for url in urls:
@@ -25,11 +25,11 @@ def extract_tiktok_url(text):
             return url
     return None
 
-# ارسال ویدیو با requests
+# تابع ارسال ویدیو با requests (پایدارتر از bot.send_video)
 def send_video_telegram(chat_id, file_path, caption, reply_to_message_id):
     url = f"https://api.telegram.org/bot{TOKEN}/sendVideo"
     with open(file_path, 'rb') as video:
-move        files = {'video': video}
+        files = {'video': video}
         data = {
             'chat_id': chat_id,
             'caption': caption,
@@ -50,12 +50,15 @@ move        files = {'video': video}
                 time.sleep(3)
     return False
 
-# دانلود ویدیو
+# دانلود ویدیو از تیک‌تاک
 def download_tiktok(url):
+    # ریدایرکت vt.tiktok.com
     if 'vt.tiktok.com' in url:
         try:
             with requests.Session() as s:
-                s.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+                s.headers.update({
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
                 r = s.head(url, allow_redirects=True, timeout=15)
                 url = r.url
         except Exception as e:
@@ -78,7 +81,9 @@ def download_tiktok(url):
         'merge_output_format': 'mp4',
         'quiet': True,
         'no_warnings': False,
-        'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
         'retries': 5,
         'fragment_retries': 10,
         'socket_timeout': 30,
@@ -95,16 +100,13 @@ def download_tiktok(url):
 # هندلر پیام
 @bot.message_handler(func=lambda m: 'tiktok.com' in m.text.lower())
 def reply(m):
-    file_path = None
-    status_msg = None
     try:
         url = extract_tiktok_url(m.text)
         if not url:
             bot.reply_to(m, "لینک تیک‌تاک پیدا نشد!")
             return
 
-        status_msg = bot.reply_to(m, "در حال دانلود... ⏳")
-        print(f"وضعیت پیام: {status_msg.message_id} | کاربر: {m.message_id}")
+        status = bot.reply_to(m, "در حال دانلود... ⏳")
 
         file_path = download_tiktok(url)
         if not os.path.exists(file_path):
@@ -112,27 +114,15 @@ def reply(m):
 
         size_mb = os.path.getsize(file_path) / (1024 * 1024)
         if size_mb > 48:
-            raise ValueError("فایل خیلی بزرگه (>48MB)")
+            os.remove(file_path)
+            bot.edit_message_text("فایل خیلی بزرگه (>48MB)", m.chat.id, status.id)
+            return
 
         if send_video_telegram(m.chat.id, file_path, f"دانلود شد! {size_mb:.1f}MB", m.message_id):
-            # پاک کردن پیام کاربر
-            try:
-                bot.delete_message(m.chat.id, m.message_id)
-                print(f"پیام کاربر پاک شد: {m.message_id}")
-            except Exception as e:
-                print(f"خطا در پاک کردن پیام کاربر: {e}")
-
-            # پاک کردن پیام وضعیت
-            try:
-                bot.delete_message(m.chat.id, status_msg.message_id)
-                print(f"پیام وضعیت پاک شد: {status_msg.message_id}")
-            except Exception as e:
-                print(f"خطا در پاک کردن پیام وضعیت: {e}")
-
-            bot.send_message(m.chat.id, "ویدیو با موفقیت ارسال شد! ✅")
+            os.remove(file_path)
+            bot.edit_message_text("ارسال شد ✅", m.chat.id, status.id)
         else:
             raise Exception("ارسال به تلگرام ناموفق بود.")
-
     except Exception as e:
         error_msg = str(e)
         if "Private video" in error_msg:
@@ -141,38 +131,16 @@ def reply(m):
             error_msg = "ویدیو در دسترس نیست!"
         elif "منقضی" in error_msg or "404" in error_msg:
             error_msg = "لینک منقضی شده یا نامعتبر است."
-        elif "بزرگه" in error_msg:
-            error_msg = "فایل خیلی بزرگه (>48MB)"
-
         try:
-            if status_msg:
-                bot.edit_message_text(f"خطا: {error_msg}", m.chat.id, status_msg.message_id)
+            bot.edit_message_text(f"خطا: {error_msg}", m.chat.id, status.id)
         except:
-            try:
-                bot.reply_to(m, f"خطا: {error_msg}")
-            except:
-                pass
-
-    finally:
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                print(f"فایل پاک شد: {file_path}")
-            except Exception as e:
-                print(f"خطا در پاک کردن فایل: {e}")
-
-# تست ساده
-@bot.message_handler(commands=['start'])
-def start(m):
-    bot.reply_to(m, "ربات فعال است! لینک تیک‌تاک بفرستید.")
-    print(f"کاربر {m.from_user.id} دستور /start داد")
+            bot.reply_to(m, f"خطا: {error_msg}")
 
 # اجرای ربات
 if __name__ == '__main__':
     print("ربات روشن شد — منتظر پیام...")
-    while True:
-        try:
-            bot.infinity_polling(timeout=20, long_polling_timeout=30)
-        except Exception as e:
-            print(f"Polling قطع شد: {e}")
-            time.sleep(5)
+    try:
+        bot.infinity_polling(timeout=20, long_polling_timeout=25)
+    except Exception as e:
+        print(f"خطای polling: {e}")
+        time.sleep(5)
