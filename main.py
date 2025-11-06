@@ -137,7 +137,7 @@ def reply(m):
             bot.reply_to(m, f"خطا: {error_msg}")
 
 # اجرای ربات
-if name == 'main':
+if __name__ == '__main__':
     print("ربات روشن شد — منتظر پیام...")
     try:
         bot.infinity_polling(timeout=20, long_polling_timeout=25)
