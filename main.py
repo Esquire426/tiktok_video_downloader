@@ -6,7 +6,6 @@ import time
 import logging
 import requests
 
-# لاگ برای دیباگ (در Railway هم نشون میده)
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv('TOKEN')
@@ -16,7 +15,6 @@ if not TOKEN:
 
 bot = telebot.TeleBot(TOKEN)
 
-# استخراج لینک تیک‌تاک از متن
 def extract_tiktok_url(text):
     urls = re.findall(r'(https?://[^\s]+tiktok\.com/[^\s]+)', text)
     for url in urls:
@@ -25,7 +23,6 @@ def extract_tiktok_url(text):
             return url
     return None
 
-# تابع ارسال ویدیو با requests (پایدارتر از bot.send_video)
 def send_video_telegram(chat_id, file_path, caption, reply_to_message_id):
     url = f"https://api.telegram.org/bot{TOKEN}/sendVideo"
     with open(file_path, 'rb') as video:
@@ -50,9 +47,8 @@ def send_video_telegram(chat_id, file_path, caption, reply_to_message_id):
                 time.sleep(3)
     return False
 
-# دانلود ویدیو از تیک‌تاک
 def download_tiktok(url):
-    # ریدایرکت vt.tiktok.com
+
     if 'vt.tiktok.com' in url:
         try:
             with requests.Session() as s:
@@ -97,7 +93,6 @@ def download_tiktok(url):
     except Exception as e:
         raise ValueError(f"دانلود نشد: {str(e)}")
 
-# هندلر پیام
 @bot.message_handler(func=lambda m: 'tiktok.com' in m.text.lower())
 def reply(m):
     try:
@@ -136,7 +131,6 @@ def reply(m):
         except:
             bot.reply_to(m, f"خطا: {error_msg}")
 
-# اجرای ربات
 if __name__ == '__main__':
     print("ربات روشن شد — منتظر پیام...")
     try:
